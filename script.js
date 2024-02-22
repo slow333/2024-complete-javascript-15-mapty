@@ -15,10 +15,14 @@ const inputElevation = document.querySelector('.form__input--elevation');
 class Workout {
   date = new Date();
   id = Date.now()+'';
+  clicks = 0;
   constructor(coords, distance, duration) {
     this.coords = coords; // [lat, lng]
     this.distance= distance;
     this.duration = duration;
+  }
+  click() {
+    this.clicks++
   }
 }
 class Running extends Workout {
@@ -55,28 +59,32 @@ class Cycling extends Workout {
 class App {
   // private variables.
   #map;
+  #mapZoomLevel = 15
   #mapEvent;
   #markerOption = {opacity: 0.8, shadowPaine: 'shadowPane',}
   #workouts = [];
 
   constructor() {
+    // get users positions
     this._getPosition();
+    // Get data.from local storage
+    this._getLocalStorage();
+    // Attach event handlers
     form.addEventListener('submit', this._newWorkout.bind(this));
     inputType.addEventListener('change', this._toggleElevationField);
+    containerWorkouts.addEventListener('click', this._moveToPopup.bind(this))
   }
   _getPosition() {
     if (navigator.geolocation)
       navigator.geolocation.getCurrentPosition(this._loadMap.bind(this),
-           function (err) {
-             console.log('위치를 찾을 수 없습니다.');
-           });
+           (err) => console.log('위치를 찾을 수 없습니다.'));
   }
   _loadMap(position) {
     const {latitude, longitude} = position.coords;
     console.log(`https://www.google.pt/maps/@${latitude},${longitude}`)
 
     const coords = [latitude, longitude];
-    this.#map = L.map('map').setView(coords, 16);
+    this.#map = L.map('map').setView(coords, this.#mapZoomLevel);
 
     // L.tileLayer('https://tile.openstreetmap.org/{z}/{x}/{y}.png', {
     L.tileLayer('https://tile.openstreetmap.fr/hot/{z}/{x}/{y}.png', {
@@ -84,18 +92,28 @@ class App {
     }).addTo(this.#map);
 
     L.marker(coords).addTo(this.#map)
-      .bindPopup(L.popup({
-        maxWidth: 300, minWidth: 60, autoClose: false, closeOnClick: false, }))
+      .bindPopup(L.popup({ autoClose: false, closeOnClick: false, }))
       .setPopupContent('하루의 시작 </br>🎉🎉🎉')
       .openPopup();
 
     // handling clicks on map
     this.#map.on('click', this._showForm.bind(this)); // 초기 나의 위치에 마커 설정
+
+    this.#workouts.forEach(workout => {
+      this._renderWorkoutMarker(workout);
+    })
   }
   _showForm(mapEv) {
     this.#mapEvent = mapEv;
     form.classList.remove('hidden');
     inputDistance.focus();
+  }
+  _hideForm() {
+    // Empty inpus
+    inputDistance.value = inputDuration.value = inputCadence.value = inputElevation.value = '';
+    form.style.display = 'none';
+    form.classList.add('hidden');
+    setTimeout(() => form.style.display = 'grid', 1000)
   }
   _toggleElevationField() {
     inputElevation.closest('.form__row').classList.toggle('form__row--hidden')
@@ -129,73 +147,66 @@ class App {
     }
     this.#workouts.push(workout);
     console.log(workout)
+    console.log(this.#workouts)
 
-    const spm = Math.round(+inputDuration.value / +inputCadence.value);
-    const onDate = workout.date;
-    const dataId = workout.id;
-    const month = onDate.getMonth() + 1;
-    const day = onDate.getDay();
-
-    const htmlRunning = `
-    <li class="workout workout--running" data-id=${dataId}>
-      <h2 class="workout__title">Running on ${month}월 ${day}일</h2>
-      <div class="workout__details">
-        <span class="workout__icon">🏃‍♂️</span>
-        <span class="workout__value">${distance}</span>
-        <span class="workout__unit">km</span>
-      </div>
-      <div class="workout__details">
-        <span class="workout__icon">⏱</span>
-        <span class="workout__value">${duration}</span>
-        <span class="workout__unit">min</span>
-      </div>
-      <div class="workout__details">
-        <span class="workout__icon">⚡️</span>
-        <span class="workout__value">${cadence}</span>
-        <span class="workout__unit">min/km</span>
-      </div>
-      <div class="workout__details">
-        <span class="workout__icon">🦶🏼</span>
-        <span class="workout__value">${spm}</span>
-        <span class="workout__unit">spm</span>
-      </div>
-    </li>
-  `;
-    const htmlCycling = `
-    <li class="workout workout--cycling" data-id=${dataId}>
-      <h2 class="workout__title">Cycling on  ${month}월 ${day}일</h2>
-      <div class="workout__details">
-        <span class="workout__icon">🚴‍♀️</span>
-        <span class="workout__value">${distance}</span>
-        <span class="workout__unit">km</span>
-      </div>
-      <div class="workout__details">
-        <span class="workout__icon">⏱</span>
-        <span class="workout__value">${duration}</span>
-        <span class="workout__unit">min</span>
-      </div>
-      <div class="workout__details">
-        <span class="workout__icon">⚡️</span>
-        <span class="workout__value">${elevation}</span>
-        <span class="workout__unit">km/h</span>
-      </div>
-      <div class="workout__details">
-        <span class="workout__icon">⛰</span>
-        <span class="workout__value">223</span>
-        <span class="workout__unit">m</span>
-      </div>
-    </li>
-  `;
-    if (type === 'running')
-      containerWorkouts.insertAdjacentHTML('beforeend', htmlRunning);
-    else containerWorkouts.insertAdjacentHTML('beforeend', htmlCycling);
-
-    // clear input fields
-    distance = duration = cadence = elevation = '';
-
-    this.renderWorkoutMarker(workout);
+    this._renderWorkout(workout);
+    this._renderWorkoutMarker(workout);
+    // Hide form and clear input fields
+    this._hideForm();
+    // localstorage
+    this._setLocalStorage();
   }
-  renderWorkoutMarker(workout) {
+
+  _renderWorkout(workout) {
+    const workDate = new Date(workout.date)
+    let html = `
+      <li class='workout workout--${workout.type}' data-id=${workout.id}>
+        <h2 class="workout__title">Running on ${months.at(workDate.getMonth())} ${workDate.getDate()}</h2>
+        <div class="workout__details">
+          <span class="workout__icon">${workout.type === 'running' ? '🏃‍♂️' : '🚴‍♀️'}</span>
+          <span class="workout__value">${workout.distance}</span>
+          <span class="workout__unit">km</span>
+        </div>
+        <div class="workout__details">
+          <span class="workout__icon">⏱</span>
+          <span class="workout__value">${workout.duration}</span>
+          <span class="workout__unit">min</span>
+        </div>
+    `;
+    if (workout.type === 'running') {
+      html += `
+        <div class="workout__details">
+          <span class="workout__icon">⚡️</span>
+          <span class="workout__value">${workout.pace.toFixed(1)}</span>
+          <span class="workout__unit">min/km</span>
+        </div>
+        <div class="workout__details">
+          <span class="workout__icon">🦶🏼</span>
+          <span class="workout__value">${workout.cadence}</span>
+          <span class="workout__unit">spm</span>
+        </div>
+      </li>
+    `;
+    }
+    if (workout.type === 'cycling') {
+      html += `
+        <div class="workout__details">
+          <span class="workout__icon">⚡️</span>
+          <span class="workout__value">${workout.speed.toFixed(1)}</span>
+          <span class="workout__unit">km/h</span>
+        </div>
+        <div class="workout__details">
+          <span class="workout__icon">⛰</span>
+          <span class="workout__value">${workout.elevationGain}</span>
+          <span class="workout__unit">m</span>
+        </div>
+      </li>
+    `;
+    }
+    // containerWorkouts.insertAdjacentHTML('beforeend', html);
+    form.insertAdjacentHTML('afterend', html);
+  }
+  _renderWorkoutMarker(workout) {
     L.marker(workout.coords, this.#markerOption)
       .addTo(this.#map)
       .bindPopup(L.popup({
@@ -203,14 +214,46 @@ class App {
         className: `workout--${workout.type}`,
       }))
       .setPopupContent(`${workout.type === 'cycling' ? 
-        workout.distance + ' cycling km' : 
-        workout.distance + ' running km'}`) // override popup content
+         '🚴‍♀️ ' + workout.distance + ' km cycling' :
+         '🏃‍♂️ ' + workout.distance + ' km running'}`) // override popup content
       .openPopup();
+  }
+  _moveToPopup(e) {
+    const workoutEl = e.target.closest('.workout');
+    if(!workoutEl) return;
+
+    const workout = this.#workouts.find(work => work.id === workoutEl.dataset.id);
+
+    this.#map.setView(workout.coords, this.#mapZoomLevel, {
+      animate: true,
+      pan: {
+        duration: 1
+      }
+    });
+    // using the public interface
+    // workout.click();  ==> localstorage에 저장해서 불러오면 prototype을 복구못함(함수를 복구하지 못함 방법은 있음)
+  }
+  _setLocalStorage() {
+    localStorage.setItem('workouts', JSON.stringify(this.#workouts))
+  }
+  _getLocalStorage() {
+    const data = JSON.parse(localStorage.getItem('workouts'));
+    console.log(data)
+    if(!data) return;
+
+    this.#workouts = data;
+    this.#workouts.forEach(workout => {
+      this._renderWorkout(workout);
+    })
+  }
+  reset() {
+    localStorage.removeItem('workouts');
+    location.reload();
   }
 }
 
 const app = new App();
 
-
-
-
+// edit, delete, sort workout
+// show all workouts on the map
+// draw lines and shapes instead of just points
